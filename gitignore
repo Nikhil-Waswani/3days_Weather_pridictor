@@ -1,0 +1,17 @@
+# Environment variables — never push this
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data files (can get large)
+aqi_features.csv
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
