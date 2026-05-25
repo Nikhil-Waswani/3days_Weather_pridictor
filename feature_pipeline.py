@@ -1,16 +1,26 @@
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-API_KEY  = os.getenv("OPENWEATHER_API_KEY")
-LAT      = float(os.getenv("LAT"))
-LON      = float(os.getenv("LON"))
-CSV_PATH = "aqi_features.csv"
+API_KEY          = os.getenv("OPENWEATHER_API_KEY")
+LAT              = float(os.getenv("LAT"))
+LON              = float(os.getenv("LON"))
+FIREBASE_KEY     = os.getenv("FIREBASE_KEY_PATH")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── INIT FIREBASE ─────────────────────────────────────────────────────────────
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_KEY)
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -53,9 +63,9 @@ def fetch_current_weather():
 
 
 def compute_features(air_data, weather_data):
-    dt = datetime.utcfromtimestamp(air_data["dt"])
+    dt = datetime.fromtimestamp(air_data["dt"], tz=timezone.utc)
     row = {}
-    row["timestamp"]  = dt
+    row["timestamp"]  = dt.isoformat()
     row["hour"]       = dt.hour
     row["day"]        = dt.weekday()
     row["month"]      = dt.month
@@ -78,22 +88,33 @@ def compute_features(air_data, weather_data):
     return row
 
 
-def save_to_csv(row):
-    df_new = pd.DataFrame([row])
-    if os.path.exists(CSV_PATH):
-        df_new.to_csv(CSV_PATH, mode="a", header=False, index=False)
+def compute_aqi_change_rate(row):
+    """
+    Fetch last saved AQI from Firestore and compute change rate.
+    """
+    docs = db.collection("aqi_features") \
+             .order_by("timestamp", direction=firestore.Query.DESCENDING) \
+             .limit(2) \
+             .stream()
+
+    rows = [d.to_dict() for d in docs]
+
+    if len(rows) >= 2:
+        row["aqi_change_rate"] = row["aqi"] - rows[1]["aqi"]
     else:
-        df_new.to_csv(CSV_PATH, mode="w", header=True, index=False)
-    print(f"[{row['timestamp']}] Saved — AQI: {row['aqi']}, PM2.5: {row['pm2_5']}, Temp: {row['temp']}°C")
+        row["aqi_change_rate"] = 0.0
+
+    return row
 
 
-def compute_aqi_change_rate():
-    if not os.path.exists(CSV_PATH):
-        return
-    df = pd.read_csv(CSV_PATH)
-    df["aqi_change_rate"] = df["aqi"].diff()
-    df.to_csv(CSV_PATH, index=False)
-    print(f"aqi_change_rate updated. Total rows: {len(df)}")
+def save_to_firestore(row):
+    """
+    Save one row to Firestore under collection 'aqi_features'.
+    Each document is named by its timestamp.
+    """
+    doc_id = row["timestamp"].replace(":", "-")   # Firestore doesn't allow : in doc IDs
+    db.collection("aqi_features").document(doc_id).set(row)
+    print(f"[{row['timestamp']}] Saved to Firestore — AQI: {row['aqi']}, PM2.5: {row['pm2_5']}, Temp: {row['temp']}°C")
 
 
 def run_pipeline():
@@ -101,8 +122,8 @@ def run_pipeline():
     air_data     = fetch_current_air_pollution()
     weather_data = fetch_current_weather()
     row          = compute_features(air_data, weather_data)
-    save_to_csv(row)
-    compute_aqi_change_rate()
+    row          = compute_aqi_change_rate(row)
+    save_to_firestore(row)
     print("── Done ──")
 
 

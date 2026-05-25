@@ -15,3 +15,6 @@ aqi_features.csv
 # OS
 .DS_Store
 Thumbs.db
+
+#firebase
+firebase_key.json
