@@ -1,0 +1,35 @@
+name: Feature Pipeline — Every Hour
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # runs every hour
+  workflow_dispatch:        # allows manual run from GitHub Actions tab
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pandas firebase-admin python-dotenv
+
+      - name: Create Firebase key file from secret
+        run: echo '${{ secrets.FIREBASE_KEY_JSON }}' > firebase_key.json
+
+      - name: Create .env file from secrets
+        run: |
+          echo "OPENWEATHER_API_KEY=${{ secrets.OPENWEATHER_API_KEY }}" > .env
+          echo "LAT=${{ secrets.LAT }}" >> .env
+          echo "LON=${{ secrets.LON }}" >> .env
+          echo "FIREBASE_KEY_PATH=firebase_key.json" >> .env
+
+      - name: Run feature pipeline
+        run: python feature_pipeline.py
