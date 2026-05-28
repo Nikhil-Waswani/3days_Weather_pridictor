@@ -7,48 +7,72 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 import pickle
 import os
+from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-CSV_PATH       = "historical_data.csv"
-MODEL_PATH     = "model.pkl"
-SCALER_PATH    = "scaler.pkl"
+CSV_PATH      = "historical_data.csv"
+MODEL_PATH    = "model.pkl"
+SCALER_PATH   = "scaler.pkl"
+FIREBASE_KEY  = os.getenv("FIREBASE_KEY_PATH")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── INIT FIREBASE ─────────────────────────────────────────────────────────────
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_KEY)
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def load_data():
-    print("── Loading data ──")
+def load_historical_data():
+    print("── Loading historical data from CSV ──")
     df = pd.read_csv(CSV_PATH)
-    print(f"Total rows: {len(df)}")
-    print(f"Columns: {list(df.columns)}")
+    print(f"Historical rows: {len(df)}")
+    return df
+
+
+def fetch_firestore_data():
+    print("── Fetching live data from Firestore ──")
+    docs = db.collection("aqi_features") \
+             .order_by("timestamp") \
+             .stream()
+    rows = [d.to_dict() for d in docs]
+    df = pd.DataFrame(rows)
+    print(f"Firestore rows: {len(df)}")
+    return df
+
+
+def combine_data(df_hist, df_live):
+    print("── Combining historical + live data ──")
+    df = pd.concat([df_hist, df_live], ignore_index=True)
+    df = df.drop_duplicates(subset=["timestamp"])
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    print(f"Total combined rows: {len(df)}")
     return df
 
 
 def prepare_features(df):
     print("── Preparing features ──")
-
-    # Drop rows with missing values
     df = df.dropna()
 
-    # Features (model inputs)
     feature_cols = [
         "hour", "day", "month",
         "pm2_5", "pm10", "co", "no", "no2", "o3", "so2", "nh3",
         "temp", "humidity", "pressure", "wind_speed", "wind_deg",
         "clouds", "visibility", "aqi_change_rate"
     ]
-
-    # Target (what we want to predict)
-    target_col = "aqi"
-
-    # Only keep columns that exist in our data
+    target_col   = "aqi"
     feature_cols = [c for c in feature_cols if c in df.columns]
 
     X = df[feature_cols]
     y = df[target_col]
 
-    print(f"Features used: {feature_cols}")
     print(f"Training samples: {len(X)}")
-
     return X, y, feature_cols
 
 
@@ -66,18 +90,17 @@ def evaluate_model(name, y_test, y_pred):
 def train(X_train, y_train, X_test, y_test, scaler):
     results = {}
 
-    # ── Model 1: Ridge Regression (main model) ────────────────────────────────
+    # ── Ridge Regression ──────────────────────────────────────────────────────
     print("\nTraining Ridge Regression...")
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled  = scaler.transform(X_test)
-
     ridge = Ridge(alpha=1.0)
     ridge.fit(X_train_scaled, y_train)
     y_pred_ridge = ridge.predict(X_test_scaled)
     rmse, mae, r2 = evaluate_model("Ridge Regression", y_test, y_pred_ridge)
     results["Ridge"] = {"model": ridge, "rmse": rmse, "mae": mae, "r2": r2, "scaled": True}
 
-    # ── Model 2: Random Forest (for comparison) ───────────────────────────────
+    # ── Random Forest ─────────────────────────────────────────────────────────
     print("\nTraining Random Forest...")
     rf = RandomForestRegressor(n_estimators=100, random_state=42)
     rf.fit(X_train, y_train)
@@ -90,14 +113,10 @@ def train(X_train, y_train, X_test, y_test, scaler):
 
 def save_best_model(results, scaler, feature_cols):
     print("\n── Comparing models ──")
-
-    # Pick model with lowest RMSE
     best_name = min(results, key=lambda k: results[k]["rmse"])
     best      = results[best_name]
-
     print(f"Best model: {best_name} (RMSE: {best['rmse']:.4f}, R²: {best['r2']:.4f})")
 
-    # Save model
     with open(MODEL_PATH, "wb") as f:
         pickle.dump({
             "model":        best["model"],
@@ -109,7 +128,6 @@ def save_best_model(results, scaler, feature_cols):
             "r2":           best["r2"],
         }, f)
 
-    # Save scaler separately
     with open(SCALER_PATH, "wb") as f:
         pickle.dump(scaler, f)
 
@@ -120,10 +138,11 @@ def save_best_model(results, scaler, feature_cols):
 def run_training():
     print("══ Starting Training Pipeline ══")
 
-    df                    = load_data()
-    X, y, feature_cols    = prepare_features(df)
+    df_hist          = load_historical_data()
+    df_live          = fetch_firestore_data()
+    df               = combine_data(df_hist, df_live)
+    X, y, feat_cols  = prepare_features(df)
 
-    # Split data — 80% train, 20% test
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
@@ -131,8 +150,7 @@ def run_training():
 
     scaler  = StandardScaler()
     results = train(X_train, y_train, X_test, y_test, scaler)
-
-    save_best_model(results, scaler, feature_cols)
+    save_best_model(results, scaler, feat_cols)
 
     print("\n══ Training Complete ══")
 
