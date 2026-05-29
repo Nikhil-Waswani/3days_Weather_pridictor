@@ -17,32 +17,31 @@ st.set_page_config(page_title="AQI Predictor", page_icon="🌤️", layout="cent
 
 # ── INIT FIREBASE ─────────────────────────────────────────────────────────────
 @st.cache_resource
+@st.cache_resource
 def init_firebase():
     if firebase_admin._apps:
         return firestore.client()
 
-    # Try Streamlit secrets first (for deployment)
     try:
-        firebase_dict = dict(st.secrets["firebase"])
-        # private_key needs newlines fixed
-        firebase_dict["private_key"] = firebase_dict["private_key"].replace("\\n", "\n")
-
-        # Write to temp file
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w")
-        json.dump(firebase_dict, tmp)
-        tmp.close()
-
-        cred = credentials.Certificate(tmp.name)
+        # Read Firebase credentials from Streamlit secrets
+        firebase_dict = {
+            "type": st.secrets["firebase"]["type"],
+            "project_id": st.secrets["firebase"]["project_id"],
+            "private_key_id": st.secrets["firebase"]["private_key_id"],
+            "private_key": st.secrets["firebase"]["private_key"].replace("\\n", "\n"),
+            "client_email": st.secrets["firebase"]["client_email"],
+            "client_id": st.secrets["firebase"]["client_id"],
+            "auth_uri": st.secrets["firebase"]["auth_uri"],
+            "token_uri": st.secrets["firebase"]["token_uri"],
+        }
+        cred = credentials.Certificate(firebase_dict)
         firebase_admin.initialize_app(cred)
-
     except Exception:
-        # Fall back to local file (for local development)
         FIREBASE_KEY = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
         cred = credentials.Certificate(FIREBASE_KEY)
         firebase_admin.initialize_app(cred)
 
     return firestore.client()
-
 db = init_firebase()
 
 # ── LOAD MODEL ────────────────────────────────────────────────────────────────
