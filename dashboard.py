@@ -4,7 +4,6 @@ import numpy as np
 import pickle
 import os
 import json
-import tempfile
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import firebase_admin
@@ -17,31 +16,33 @@ st.set_page_config(page_title="AQI Predictor", page_icon="🌤️", layout="cent
 
 # ── INIT FIREBASE ─────────────────────────────────────────────────────────────
 @st.cache_resource
-@st.cache_resource
 def init_firebase():
     if firebase_admin._apps:
         return firestore.client()
 
-    try:
-        # Read Firebase credentials from Streamlit secrets
+    # Check if running on Streamlit Cloud (secrets available)
+    if "firebase" in st.secrets:
         firebase_dict = {
-            "type": st.secrets["firebase"]["type"],
-            "project_id": st.secrets["firebase"]["project_id"],
-            "private_key_id": st.secrets["firebase"]["private_key_id"],
-            "private_key": st.secrets["firebase"]["private_key"].replace("\\n", "\n"),
-            "client_email": st.secrets["firebase"]["client_email"],
-            "client_id": st.secrets["firebase"]["client_id"],
-            "auth_uri": st.secrets["firebase"]["auth_uri"],
-            "token_uri": st.secrets["firebase"]["token_uri"],
+            "type":                        st.secrets["firebase"]["type"],
+            "project_id":                  st.secrets["firebase"]["project_id"],
+            "private_key_id":              st.secrets["firebase"]["private_key_id"],
+            "private_key":                 st.secrets["firebase"]["private_key"].replace("\\n", "\n"),
+            "client_email":                st.secrets["firebase"]["client_email"],
+            "client_id":                   st.secrets["firebase"]["client_id"],
+            "auth_uri":                    st.secrets["firebase"]["auth_uri"],
+            "token_uri":                   st.secrets["firebase"]["token_uri"],
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url":        f"https://www.googleapis.com/robot/v1/metadata/x509/{st.secrets['firebase']['client_email']}"
         }
         cred = credentials.Certificate(firebase_dict)
-        firebase_admin.initialize_app(cred)
-    except Exception:
+    else:
+        # Local development — use firebase_key.json file
         FIREBASE_KEY = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
         cred = credentials.Certificate(FIREBASE_KEY)
-        firebase_admin.initialize_app(cred)
 
+    firebase_admin.initialize_app(cred)
     return firestore.client()
+
 db = init_firebase()
 
 # ── LOAD MODEL ────────────────────────────────────────────────────────────────
@@ -105,7 +106,6 @@ def predict_3_days(model_data, scaler, latest_row):
 st.title("🌤️ AQI Forecast — Khairpur, PK")
 st.caption("Live data from OpenWeather · Predictions by Random Forest model")
 
-# Load model and data
 try:
     model_data = load_model()
     scaler     = load_scaler()
@@ -127,9 +127,7 @@ latest = df.iloc[-1]
 
 st.divider()
 
-# ── CURRENT CONDITIONS ────────────────────────────────────────────────────────
 st.subheader("📍 Current Conditions")
-
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("AQI", f"{int(latest['aqi'])} — {aqi_label(int(latest['aqi']))}")
 col2.metric("Temperature", f"{latest['temp']}°C")
@@ -138,11 +136,8 @@ col4.metric("Wind Speed", f"{latest['wind_speed']} m/s")
 
 st.divider()
 
-# ── 3-DAY FORECAST ────────────────────────────────────────────────────────────
 st.subheader("📅 3-Day AQI Forecast")
-
 predictions = predict_3_days(model_data, scaler, latest.to_dict())
-
 today = datetime.now(tz=timezone.utc)
 day1  = (today + timedelta(days=1)).strftime("%b %d")
 day2  = (today + timedelta(days=2)).strftime("%b %d")
@@ -155,9 +150,7 @@ col3.metric(f"Day 3 · {day3}",    f"AQI {predictions[2]}", aqi_label(prediction
 
 st.divider()
 
-# ── AQI HISTORY CHART ─────────────────────────────────────────────────────────
 st.subheader("📈 Last 24 Hours — AQI Trend")
-
 if len(df) >= 2:
     chart_df = df[["timestamp", "aqi"]].set_index("timestamp")
     st.line_chart(chart_df)
@@ -166,7 +159,6 @@ else:
 
 st.divider()
 
-# ── MODEL INFO ────────────────────────────────────────────────────────────────
 with st.expander("ℹ️ Model Info"):
     st.write(f"**Model:** {model_data['model_name']}")
     st.write(f"**RMSE:** {model_data['rmse']:.4f}")
