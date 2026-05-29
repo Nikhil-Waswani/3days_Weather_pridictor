@@ -1,0 +1,43 @@
+name: Train Model — Every Day
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # runs every day at midnight UTC
+  workflow_dispatch:        # allows manual run from GitHub Actions tab
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pandas firebase-admin python-dotenv scikit-learn
+
+      - name: Create Firebase key file from secret
+        run: echo '${{ secrets.FIREBASE_KEY_JSON }}' > firebase_key.json
+
+      - name: Create .env file from secrets
+        run: |
+          echo "OPENWEATHER_API_KEY=${{ secrets.OPENWEATHER_API_KEY }}" > .env
+          echo "LAT=${{ secrets.LAT }}" >> .env
+          echo "LON=${{ secrets.LON }}" >> .env
+          echo "FIREBASE_KEY_PATH=firebase_key.json" >> .env
+
+      - name: Run training pipeline
+        run: python train_model.py
+
+      - name: Save model back to GitHub repo
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add model.pkl scaler.pkl
+          git commit -m "update model — $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git push
