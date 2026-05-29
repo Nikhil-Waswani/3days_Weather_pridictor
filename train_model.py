@@ -12,12 +12,13 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
+FIREBASE_KEY = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 CSV_PATH      = "historical_data.csv"
 MODEL_PATH    = "model.pkl"
 SCALER_PATH   = "scaler.pkl"
-FIREBASE_KEY  = os.getenv("FIREBASE_KEY_PATH")
+FIREBASE_KEY = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── INIT FIREBASE ─────────────────────────────────────────────────────────────
