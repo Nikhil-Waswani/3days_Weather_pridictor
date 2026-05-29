@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
+load_dotenv()
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="AQI Predictor", page_icon="🌤️", layout="centered")
