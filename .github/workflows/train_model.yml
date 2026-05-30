@@ -19,8 +19,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests pandas firebase-admin python-dotenv scikit-learn
+        run: pip install requests pandas firebase-admin python-dotenv scikit-learn xgboost
 
+         
       - name: Create Firebase key file from secret
         run: echo '${{ secrets.FIREBASE_KEY_JSON }}' > firebase_key.json
 

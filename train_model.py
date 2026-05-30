@@ -5,6 +5,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
+from xgboost import XGBRegressor
 import pickle
 import os
 from dotenv import load_dotenv
@@ -12,13 +13,12 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
-FIREBASE_KEY = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-CSV_PATH      = "historical_data.csv"
+CSV_PATH      = "historical_data.csv" 
 MODEL_PATH    = "model.pkl"
 SCALER_PATH   = "scaler.pkl"
-FIREBASE_KEY = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
+FIREBASE_KEY  = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── INIT FIREBASE ─────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ def evaluate_model(name, y_test, y_pred):
 def train(X_train, y_train, X_test, y_test, scaler):
     results = {}
 
-    # ── Ridge Regression ──────────────────────────────────────────────────────
+    # ── Model 1: Ridge Regression ─────────────────────────────────────────────
     print("\nTraining Ridge Regression...")
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled  = scaler.transform(X_test)
@@ -101,7 +101,7 @@ def train(X_train, y_train, X_test, y_test, scaler):
     rmse, mae, r2 = evaluate_model("Ridge Regression", y_test, y_pred_ridge)
     results["Ridge"] = {"model": ridge, "rmse": rmse, "mae": mae, "r2": r2, "scaled": True}
 
-    # ── Random Forest ─────────────────────────────────────────────────────────
+    # ── Model 2: Random Forest ────────────────────────────────────────────────
     print("\nTraining Random Forest...")
     rf = RandomForestRegressor(n_estimators=100, random_state=42)
     rf.fit(X_train, y_train)
@@ -109,14 +109,25 @@ def train(X_train, y_train, X_test, y_test, scaler):
     rmse, mae, r2 = evaluate_model("Random Forest", y_test, y_pred_rf)
     results["RandomForest"] = {"model": rf, "rmse": rmse, "mae": mae, "r2": r2, "scaled": False}
 
+    # ── Model 3: XGBoost ──────────────────────────────────────────────────────
+    print("\nTraining XGBoost...")
+    xgb = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42, verbosity=0)
+    xgb.fit(X_train, y_train)
+    y_pred_xgb = xgb.predict(X_test)
+    rmse, mae, r2 = evaluate_model("XGBoost", y_test, y_pred_xgb)
+    results["XGBoost"] = {"model": xgb, "rmse": rmse, "mae": mae, "r2": r2, "scaled": False}
+
     return results
 
 
 def save_best_model(results, scaler, feature_cols):
-    print("\n── Comparing models ──")
+    print("\n── Comparing all 3 models ──")
+    for name, res in results.items():
+        print(f"{name:15} → RMSE: {res['rmse']:.4f} | MAE: {res['mae']:.4f} | R²: {res['r2']:.4f}")
+
     best_name = min(results, key=lambda k: results[k]["rmse"])
     best      = results[best_name]
-    print(f"Best model: {best_name} (RMSE: {best['rmse']:.4f}, R²: {best['r2']:.4f})")
+    print(f"\n✅ Best model: {best_name} (RMSE: {best['rmse']:.4f}, R²: {best['r2']:.4f})")
 
     with open(MODEL_PATH, "wb") as f:
         pickle.dump({
