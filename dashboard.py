@@ -21,7 +21,12 @@ def init_firebase():
         return firestore.client()
 
     # Check if running on Streamlit Cloud (secrets available)
-    if "firebase" in st.secrets:
+    try:
+        firebase_secrets = st.secrets.get("firebase")
+    except:
+        firebase_secrets = None
+        
+    if firebase_secrets:
         firebase_dict = {
             "type":                        st.secrets["firebase"]["type"],
             "project_id":                  st.secrets["firebase"]["project_id"],
