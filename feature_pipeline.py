@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
+load_dotenv()
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 API_KEY      = os.getenv("OPENWEATHER_API_KEY")
