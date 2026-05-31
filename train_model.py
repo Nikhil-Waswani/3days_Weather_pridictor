@@ -50,7 +50,14 @@ def fetch_firestore_data():
 
 def combine_data(df_hist, df_live):
     print("── Combining historical + live data ──")
-    df = pd.concat([df_hist, df_live], ignore_index=True)
+    
+    # Keep only columns that exist in historical data
+    common_cols = [c for c in df_hist.columns if c in df_live.columns]
+    
+    df_hist_clean = df_hist[common_cols]
+    df_live_clean = df_live[common_cols] if len(df_live) > 0 else pd.DataFrame(columns=common_cols)
+    
+    df = pd.concat([df_hist_clean, df_live_clean], ignore_index=True)
     df = df.drop_duplicates(subset=["timestamp"])
     df = df.sort_values("timestamp").reset_index(drop=True)
     print(f"Total combined rows: {len(df)}")
@@ -60,6 +67,8 @@ def combine_data(df_hist, df_live):
 def prepare_features(df):
     print("── Preparing features ──")
     df = df.dropna()
+    # Drop non-numeric columns
+    df = df.drop(columns=["aqi_category"], errors="ignore")
 
     feature_cols = [
         "hour", "day", "month",
