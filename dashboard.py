@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import pickle
 import os
-import json
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import firebase_admin
@@ -11,15 +10,13 @@ from firebase_admin import credentials, firestore
 
 load_dotenv()
 
-# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="AQI Predictor", page_icon="🌤️", layout="centered")
+st.set_page_config(page_title="AQI Predictor — Khairpur", page_icon="🌤️", layout="centered")
 
 # ── INIT FIREBASE ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def init_firebase():
     if firebase_admin._apps:
         return firestore.client()
-
     try:
         firebase_secrets = st.secrets.get("firebase")
     except:
@@ -57,13 +54,10 @@ def aqi_label(aqi):
     if aqi <= 300:  return "Very Unhealthy"
     return "Hazardous"
 
-def aqi_color(aqi):
-    if aqi <= 50:   return "green"
-    if aqi <= 100:  return "orange"
-    if aqi <= 150:  return "red"
-    if aqi <= 200:  return "red"
-    if aqi <= 300:  return "violet"
-    return "violet"
+def aqi_status_color(aqi):
+    if aqi <= 50:   return "success"
+    if aqi <= 100:  return "warning"
+    return "error"
 
 # ── LOAD MODEL ────────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -84,8 +78,8 @@ def fetch_firestore_data():
              .limit(25) \
              .stream()
     rows = [d.to_dict() for d in docs]
-    df = pd.DataFrame(rows)
-    df = df.sort_values("timestamp")
+    df   = pd.DataFrame(rows)
+    df   = df.sort_values("timestamp")
     return df
 
 # ── PREDICT 3 DAYS ────────────────────────────────────────────────────────────
@@ -94,37 +88,52 @@ def predict_3_days(model_data, scaler, latest_row):
     model        = model_data["model"]
     scaled       = model_data["scaled"]
 
-    predictions = []
-    current_row = latest_row.copy()
+    predictions  = []
+    current_row  = latest_row.copy()
+    change_rate  = latest_row.get("aqi_change_rate", 0)
+    base_aqi     = latest_row["aqi"] if latest_row["aqi"] != 0 else 1
 
     for day in range(1, 4):
         current_row["hour"]  = 12
         current_row["day"]   = (latest_row["day"] + day) % 7
         current_row["month"] = latest_row["month"]
 
-        X = pd.DataFrame([current_row])[feature_cols]
+        # Compound trend factor — increases each day
+        daily_rate = change_rate / base_aqi
+        factor     = 1 + (daily_rate * day)
+        factor = np.clip(factor, 0.5, 2.0)
 
+        # Apply factor to pollutants
+        for pollutant in ["pm2_5", "pm10", "co", "no2", "so2", "nh3"]:
+            if pollutant in current_row:
+                current_row[pollutant] = np.clip(latest_row[pollutant] * factor, 0, 500)
+
+        current_row["aqi_change_rate"] = change_rate
+
+        X    = pd.DataFrame([current_row])[feature_cols]
         if scaled:
             X = scaler.transform(X)
 
         pred = model.predict(X)[0]
-        pred = round(np.clip(pred, 0, 500))   # clip to 0-500 range
+        pred = round(np.clip(pred, 0, 500))
         predictions.append(pred)
+        current_row["aqi"] = pred
 
-        current_row["aqi"]             = pred
-        current_row["aqi_change_rate"] = pred - current_row["aqi"]
+        # add this temporarily in predict_3_days before return
+        # for i, p in enumerate(predictions):
+        #     print(f"Day {i+1}: factor={factors[i]:.3f} pm2_5={pm25s[i]:.2f} pred={p}")
 
     return predictions
 
 # ── DASHBOARD ─────────────────────────────────────────────────────────────────
 st.title("🌤️ AQI Forecast — Khairpur, PK")
-st.caption("Live data from OpenWeather · Standard US EPA AQI (0-500) · Predictions by Random Forest")
+st.caption("Live data from OpenWeather · Standard US EPA AQI (0-500) · Powered by Random Forest")
 
 try:
     model_data = load_model()
     scaler     = load_scaler()
 except FileNotFoundError:
-    st.error("model.pkl not found!")
+    st.error("model.pkl not found! Run train_model.py first.")
     st.stop()
 
 try:
@@ -138,8 +147,6 @@ if df.empty:
     st.stop()
 
 latest = df.iloc[-1]
-
-st.divider()
 
 # ── AQI SCALE REFERENCE ───────────────────────────────────────────────────────
 with st.expander("📊 AQI Scale Reference (US EPA Standard)"):
@@ -157,52 +164,63 @@ st.divider()
 st.subheader("📍 Current Conditions")
 
 current_aqi = int(latest["aqi"])
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("AQI (0-500)", current_aqi)
-col2.metric("Temperature", f"{latest['temp']}°C")
-col3.metric("Humidity", f"{latest['humidity']}%")
-col4.metric("Wind Speed", f"{latest['wind_speed']} m/s")
+col2.metric("PM2.5", f"{latest['pm2_5']} µg/m³")
+col3.metric("Temperature", f"{latest['temp']}°C")
+col4.metric("Humidity", f"{latest['humidity']}%")
+col5.metric("Wind Speed", f"{latest['wind_speed']} m/s")
 
-st.info(f"**Current AQI Status:** {aqi_label(current_aqi)}")
+status = aqi_label(current_aqi)
+if current_aqi <= 50:
+    st.success(f"**Current AQI Status: {status}**")
+elif current_aqi <= 100:
+    st.warning(f"**Current AQI Status: {status}**")
+else:
+    st.error(f"**Current AQI Status: {status}**")
 
 st.divider()
 
 # ── 3-DAY FORECAST ────────────────────────────────────────────────────────────
 st.subheader("📅 3-Day AQI Forecast")
+st.caption("Predictions based on current pollutant trends using Random Forest model")
 
 predictions = predict_3_days(model_data, scaler, latest.to_dict())
-today = datetime.now(tz=timezone.utc)
-day1  = (today + timedelta(days=1)).strftime("%b %d")
-day2  = (today + timedelta(days=2)).strftime("%b %d")
-day3  = (today + timedelta(days=3)).strftime("%b %d")
+today       = datetime.now(tz=timezone.utc)
+days        = [(today + timedelta(days=i)).strftime("%b %d") for i in range(1, 4)]
+labels      = ["Tomorrow", "Day 2", "Day 3"]
 
 col1, col2, col3 = st.columns(3)
-col1.metric(f"Tomorrow · {day1}", predictions[0], aqi_label(predictions[0]))
-col2.metric(f"Day 2 · {day2}",    predictions[1], aqi_label(predictions[1]))
-col3.metric(f"Day 3 · {day3}",    predictions[2], aqi_label(predictions[2]))
+cols = [col1, col2, col3]
+for i, col in enumerate(cols):
+    pred  = predictions[i]
+    label = aqi_label(pred)
+    delta = pred - current_aqi
+    col.metric(f"{labels[i]} · {days[i]}", pred, f"{'+' if delta >= 0 else ''}{delta} | {label}")
 
 st.divider()
 
 # ── AQI HISTORY CHART ─────────────────────────────────────────────────────────
-st.subheader("📈 Last 24 Hours — AQI Trend")
+st.subheader("📈 AQI Trend — Last 24 Hours")
 
 if len(df) >= 2:
     chart_df = df[["timestamp", "aqi"]].set_index("timestamp")
     st.line_chart(chart_df)
 else:
-    st.info("Not enough data yet for chart.")
+    st.info("Not enough data yet for chart. Data is collected every hour automatically.")
 
 st.divider()
 
 # ── MODEL INFO ────────────────────────────────────────────────────────────────
-with st.expander("ℹ️ Model Info"):
-    st.write(f"**Model:** {model_data['model_name']}")
-    st.write(f"**RMSE:** {model_data['rmse']:.4f}")
+with st.expander("ℹ️ Model Performance"):
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Model", model_data['model_name'])
+    col2.metric("R² Score", f"{model_data['r2']:.4f}")
+    col3.metric("RMSE", f"{model_data['rmse']:.4f}")
     st.write(f"**MAE:** {model_data['mae']:.4f}")
-    st.write(f"**R²:** {model_data['r2']:.4f}")
-    st.write(f"**Features:** {model_data['feature_cols']}")
+    st.write(f"**Features used:** {', '.join(model_data['feature_cols'])}")
 
 with st.expander("🗃️ Raw Collected Data (last 25 rows)"):
     st.dataframe(df, use_container_width=True)
 
-st.caption(f"Last updated: {latest['timestamp']}")
+st.caption(f"Last updated: {latest['timestamp']} · Data collected hourly via GitHub Actions · Stored in Firebase Firestore")
