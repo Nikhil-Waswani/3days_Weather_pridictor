@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
+from datetime import timezone, timedelta
 
 load_dotenv()
 
@@ -186,7 +187,8 @@ st.subheader("📅 3-Day AQI Forecast")
 st.caption("Predictions based on current pollutant trends using Random Forest model")
 
 predictions = predict_3_days(model_data, scaler, latest.to_dict())
-today       = datetime.now(tz=timezone.utc)
+PKT = timezone(timedelta(hours=5))
+today = datetime.now(tz=PKT)
 days        = [(today + timedelta(days=i)).strftime("%b %d") for i in range(1, 4)]
 labels      = ["Tomorrow", "Day 2", "Day 3"]
 
