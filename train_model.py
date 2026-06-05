@@ -15,7 +15,6 @@ from firebase_admin import credentials, firestore
 load_dotenv(dotenv_path=r"D:\Projects\Weather_pridictor\.env")
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-CSV_PATH      = "historical_data.csv" 
 MODEL_PATH    = "model.pkl"
 SCALER_PATH   = "scaler.pkl"
 FIREBASE_KEY  = os.getenv("FIREBASE_KEY_PATH", "firebase_key.json")
@@ -31,8 +30,12 @@ db = firestore.client()
 
 
 def load_historical_data():
-    print("── Loading historical data from CSV ──")
-    df = pd.read_csv(CSV_PATH)
+    print("── Loading historical data from Firestore ──")
+    docs = db.collection("aqi_historical") \
+             .order_by("timestamp") \
+             .stream()
+    rows = [d.to_dict() for d in docs]
+    df   = pd.DataFrame(rows)
     print(f"Historical rows: {len(df)}")
     return df
 
