@@ -2,7 +2,7 @@
 
 A fully automated, serverless machine learning system that predicts the **Air Quality Index (AQI)** for Khairpur, Pakistan for the next **3 days** using real-time data from OpenWeather API.
 
-🔗 **Live Dashboard:** [3daysweatherpridictor.streamlit.app](https://3daysweatherpridictor.streamlit.app)
+🔗 **Live Dashboard:** [https://3daysweatherpridictor.streamlit.app/](https://3daysweatherpridictor.streamlit.app/)
 
 ---
 
@@ -23,9 +23,10 @@ The AQI values follow the **standard US EPA scale (0-500)** calculated from PM2.
 ```
 OpenWeather API
       ↓ (every hour via GitHub Actions)
-feature_pipeline.py → Firebase Firestore
+feature_pipeline.py → Firebase Firestore (aqi_features)
                               ↓ (every day via GitHub Actions)
                        train_model.py → model.pkl → GitHub
+                       ↑ also reads from aqi_historical collection
                                                         ↓
                                               dashboard.py → Streamlit Cloud
 ```
@@ -36,15 +37,14 @@ feature_pipeline.py → Firebase Firestore
 
 ```
 3days_Weather_pridictor/
-├── feature_pipeline.py    # Hourly data collection
+├── feature_pipeline.py    # Hourly data collection → Firestore
 ├── backfill.py            # One-time historical data collection
+├── upload_historical.py   # Upload historical CSV to Firestore
 ├── train_model.py         # Daily model training (3 models)
 ├── dashboard.py           # Streamlit web dashboard
-├── eda.py                 # Exploratory Data Analysis
-├── shap_analysis.py       # SHAP feature importance
-├── convert_aqi.py         # Convert AQI to EPA standard
-├── historical_data.csv    # 8,520 rows of backfilled data
-├── model.pkl              # Trained best model
+├── eda.py                 # Exploratory Data Analysis (8 charts)
+├── shap_analysis.py       # SHAP feature importance (3 charts)
+├── model.pkl              # Trained best model (Random Forest)
 ├── scaler.pkl             # Feature scaler
 ├── requirements.txt       # Python dependencies
 ├── .gitignore             # Ignores .env and firebase_key.json
@@ -58,17 +58,26 @@ feature_pipeline.py → Firebase Firestore
 
 ---
 
+## 🗄️ Firebase Firestore Collections
+
+| Collection | Purpose | Rows |
+|------------|---------|------|
+| `aqi_features` | Live hourly data (grows automatically) | ~50+ and growing |
+| `aqi_historical` | 1 year backfilled historical data | 8,520 |
+
+---
+
 ## 🤖 ML Models
 
 Three models are trained and compared. The best one (lowest RMSE) is saved automatically:
 
 | Model | RMSE | MAE | R² |
 |-------|------|-----|-----|
-| Ridge Regression | 22.4852 | 12.9172 | 0.8596 |
-| **Random Forest** ✅ | **2.4789** | **0.1433** | **0.9983** |
-| XGBoost | 2.7995 | 0.6302 | 0.9978 |
+| Ridge Regression | 21.2154 | 12.3999 | 0.8772 |
+| **Random Forest** ✅ | **2.2757** | **0.1027** | **0.9986** |
+| XGBoost | 6.2547 | 0.8048 | 0.9893 |
 
-**Random Forest** consistently wins with **99.83% accuracy** on unseen data.
+**Random Forest** consistently wins with **99.86% accuracy** on 1,704 unseen test rows.
 
 ---
 
@@ -120,11 +129,11 @@ FIREBASE_KEY_PATH=firebase_key.json
 ```
 
 ### 4. Add Firebase key
-Place your `firebase_key.json` (downloaded from Firebase Console) in the project folder.
+Place your `firebase_key.json` (downloaded from Firebase Console → Project Settings → Service Accounts) in the project folder.
 
 ### 5. Run the pipeline
 ```bash
-# Collect live data
+# Collect live data once
 python feature_pipeline.py
 
 # Train models
@@ -140,8 +149,8 @@ streamlit run dashboard.py
 
 | Workflow | Schedule | Purpose |
 |----------|----------|---------|
-| `feature_pipeline.yml` | Every hour | Collect live data → Firestore |
-| `train_model.yml` | Every day (midnight UTC) | Retrain models → Push model.pkl |
+| `feature_pipeline.yml` | Every hour | Collect live data → Firestore `aqi_features` |
+| `train_model.yml` | Every day (midnight UTC) | Retrain 3 models → Push best `model.pkl` |
 
 ### GitHub Secrets Required
 - `OPENWEATHER_API_KEY`
@@ -169,14 +178,15 @@ streamlit run dashboard.py
 
 | Component | Technology |
 |-----------|-----------|
-| Data source | OpenWeather API |
-| Feature store | Firebase Firestore |
-| ML models | scikit-learn, XGBoost |
+| Data source | OpenWeather API (free tier) |
+| Feature store | Firebase Firestore (Spark plan, free) |
+| Historical store | Firebase Firestore `aqi_historical` |
+| ML models | scikit-learn (Ridge, Random Forest), XGBoost |
 | Feature importance | SHAP |
 | EDA | Matplotlib, Seaborn |
 | Dashboard | Streamlit |
 | CI/CD | GitHub Actions |
-| Deployment | Streamlit Community Cloud |
+| Deployment | Streamlit Community Cloud (free) |
 
 ---
 
